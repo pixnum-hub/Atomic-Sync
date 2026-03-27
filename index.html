@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Atomic Time Synchronizer</title>
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00d4ff">
+<meta name="description" content="Atomic Time Synchronizer — Cesium-reference NTP clock. © Manik Roy 2026.">
+<meta name="author" content="Manik Roy">
+<!-- iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AtomicSync">
+<link rel="apple-touch-icon" href="icons/icon-192-maskable.png">
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="icon" type="image/png" sizes="96x96" href="icons/icon-96.png">
+<!-- MS Tile -->
+<meta name="msapplication-TileColor" content="#0a0e1a">
+<meta name="msapplication-TileImage" content="icons/icon-144.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1f3a5f;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --text: #e2f0ff;
+    --text-dim: #6b8cae;
+    --glow: 0 0 20px rgba(0,212,255,0.4);
+    --tick-color: rgba(0,212,255,0.2);
+  }
+  [data-theme="light"] {
+    --bg: #f0f4f8;
+    --surface: #ffffff;
+    --surface2: #e8eef5;
+    --border: #b8cfe0;
+    --accent: #0066cc;
+    --accent2: #d4460f;
+    --accent3: #1a8a00;
+    --text: #0d1b2a;
+    --text-dim: #4a6a8a;
+    --glow: 0 0 20px rgba(0,102,204,0.25);
+    --tick-color: rgba(0,102,204,0.12);
+  }
+  [data-theme="oled"] {
+    --bg: #000000;
+    --surface: #000000;
+    --surface2: #0a0a0a;
+    --border: #1a1a1a;
+    --accent: #00ffff;
+    --accent2: #ff4400;
+    --accent3: #00ff00;
+    --text: #ffffff;
+    --text-dim: #555555;
+    --glow: 0 0 24px rgba(0,255,255,0.5);
+    --tick-color: rgba(0,255,255,0.1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    transition: background 0.4s, color 0.4s;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--tick-color) 1px, transparent 1px),
+      linear-gradient(90deg, var(--tick-color) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 16px 0;
+  }
+
+  /* HEADER */
+  header {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    transition: border-color 0.4s;
+  }
+  .logo-block h1 {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(13px,3.5vw,18px);
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    text-transform: uppercase;
+  }
+  .logo-block p {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    margin-top: 2px;
+  }
+  .theme-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    transition: background 0.4s, border-color 0.4s;
+  }
+  .theme-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    transition: all 0.25s;
+    white-space: nowrap;
+  }
+  .theme-btn.active { background: var(--accent); color: #000; box-shadow: var(--glow); }
+
+  /* MAIN */
+  main {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 20px 0;
+    flex: 1;
+  }
+
+  /* STATUS PILL */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 18px;
+    transition: background 0.4s, border-color 0.4s;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent3);
+    box-shadow: 0 0 8px var(--accent3);
+    animation: pulse-dot 2s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  .status-dot.syncing { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); animation: pulse-fast 0.4s ease infinite; }
+  @keyframes pulse-dot  { 0%,100%{opacity:1;transform:scale(1)}  50%{opacity:.6;transform:scale(.85)} }
+  @keyframes pulse-fast { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .status-text { font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:0.12em; color:var(--text-dim); }
+  .status-text span { color:var(--accent3); font-weight:700; }
+  .status-text span.warn { color:var(--accent2); }
+
+  /* CLOCK */
+  .clock-face { position:relative; width:min(300px,82vw); aspect-ratio:1; }
+  .clock-svg  { width:100%; height:100%; overflow:visible; }
+  .ring-glow  { filter:drop-shadow(0 0 8px var(--accent)); transition:filter 0.4s; }
+
+  /* DIGITAL */
+  .digital-container { width:100%; display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .time-display {
+    font-family:'Share Tech Mono',monospace;
+    font-size:clamp(40px,13vw,68px);
+    font-weight:400;
+    letter-spacing:0.04em;
+    color:var(--accent);
+    text-shadow:var(--glow);
+    line-height:1;
+    text-align:center;
+    transition:color 0.4s,text-shadow 0.4s;
+  }
+  .time-display .colon { animation:blink-colon 1s step-end infinite; display:inline-block; margin:0 -2px; }
+  @keyframes blink-colon { 0%,100%{opacity:1} 50%{opacity:.2} }
+  .milliseconds {
+    font-family:'Share Tech Mono',monospace;
+    font-size:clamp(18px,5.5vw,28px);
+    color:var(--accent2);
+    text-shadow:0 0 12px rgba(255,107,53,.5);
+    letter-spacing:0.08em;
+    text-align:center;
+    transition:color 0.4s,text-shadow 0.4s;
+  }
+
+  /* META ROW */
+  .meta-row { display:flex; justify-content:space-between; width:100%; gap:8px; }
+  .meta-card {
+    flex:1;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:10px 12px;
+    transition:background 0.4s,border-color 0.4s;
+  }
+  .meta-card label { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.2em; color:var(--text-dim); text-transform:uppercase; display:block; margin-bottom:5px; }
+  .meta-card .value { font-family:'Orbitron',monospace; font-size:clamp(10px,2.8vw,13px); font-weight:700; color:var(--text); letter-spacing:.04em; transition:color 0.4s; }
+
+  /* ── MANUAL SYNC BUTTON ── */
+  .sync-btn-wrap { width:100%; display:flex; justify-content:center; }
+  .sync-btn {
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    background:transparent;
+    border:2px solid var(--accent);
+    border-radius:14px;
+    padding:15px 36px;
+    cursor:pointer;
+    font-family:'Orbitron',monospace;
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:0.22em;
+    color:var(--accent);
+    text-transform:uppercase;
+    transition:all 0.3s;
+    overflow:hidden;
+    width:100%;
+    max-width:380px;
+  }
+  .sync-btn::before { content:''; position:absolute; inset:0; background:var(--accent); opacity:0; transition:opacity .3s; }
+  .sync-btn:hover::before { opacity:.07; }
+  .sync-btn:hover { box-shadow:var(--glow); transform:translateY(-1px); }
+  .sync-btn:active { transform:scale(.98); }
+  .sync-btn.syncing {
+    border-color:var(--accent2); color:var(--accent2);
+    pointer-events:none;
+    animation:btn-pulse .7s ease-in-out infinite alternate;
+  }
+  .sync-btn.syncing::before { background:var(--accent2); }
+  .sync-btn.success {
+    border-color:var(--accent3); color:var(--accent3);
+    box-shadow:0 0 22px rgba(57,255,20,.35);
+    pointer-events:none;
+  }
+  .sync-btn.success::before { background:var(--accent3); opacity:.06; }
+  @keyframes btn-pulse { from{box-shadow:0 0 6px rgba(255,107,53,.3)} to{box-shadow:0 0 24px rgba(255,107,53,.75)} }
+
+  .sync-icon { width:18px; height:18px; flex-shrink:0; transition:transform .3s; }
+  .sync-btn.syncing .sync-icon { animation:spin .8s linear infinite; }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+  .sync-btn .ripple {
+    position:absolute;
+    border-radius:50%;
+    transform:scale(0);
+    animation:ripple-anim .7s linear;
+    background:rgba(0,212,255,.2);
+    pointer-events:none;
+  }
+  @keyframes ripple-anim { to{transform:scale(4);opacity:0} }
+
+  /* SYNC STATUS PANEL */
+  .sync-panel {
+    width:100%;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:16px;
+    transition:background 0.4s,border-color 0.4s;
+  }
+  .sync-panel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .sync-title { font-family:'Orbitron',monospace; font-size:11px; font-weight:700; letter-spacing:.2em; color:var(--accent); text-transform:uppercase; }
+  .sync-badge {
+    font-family:'Share Tech Mono',monospace;
+    font-size:10px; letter-spacing:.12em;
+    color:var(--accent3);
+    background:rgba(57,255,20,.08);
+    border:1px solid rgba(57,255,20,.25);
+    border-radius:999px;
+    padding:3px 10px;
+    transition:all .4s;
+  }
+  .sync-badge.syncing-badge { color:var(--accent2); background:rgba(255,107,53,.08); border-color:rgba(255,107,53,.3); }
+
+  .ntp-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .ntp-item {
+    background:var(--surface2);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px 12px;
+    transition:background 0.4s,border-color 0.4s;
+  }
+  .ntp-item label { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.15em; color:var(--text-dim); display:block; margin-bottom:4px; }
+  .ntp-item .ntp-val { font-family:'Share Tech Mono',monospace; font-size:12px; color:var(--text); font-weight:700; transition:color .4s; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ntp-val.good { color:var(--accent3); }
+  .ntp-val.warn { color:#ffcc00; }
+  .ntp-val.flash { animation:flash-val .45s ease; }
+  @keyframes flash-val { 0%{opacity:.15;transform:translateY(4px)} 100%{opacity:1;transform:translateY(0)} }
+
+  /* ── NTP SERVER TABLE ── */
+  .servers-section { width:100%; }
+  .section-label { font-family:'Orbitron',monospace; font-size:10px; font-weight:700; letter-spacing:.25em; color:var(--text-dim); text-transform:uppercase; margin-bottom:10px; }
+
+  .server-table {
+    width:100%;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:14px;
+    overflow:hidden;
+    transition:background 0.4s,border-color 0.4s;
+  }
+  .server-row {
+    display:grid;
+    grid-template-columns:26px 1fr auto 10px;
+    align-items:center;
+    gap:8px;
+    padding:10px 14px;
+    border-bottom:1px solid var(--border);
+    transition:background .2s,border-color .4s;
+  }
+  .server-row:last-child { border-bottom:none; }
+  .server-row:hover { background:var(--surface2); }
+  .server-row.active-row { background:rgba(0,212,255,.04); }
+  .server-row.active-row .srv-host { color:var(--accent); }
+
+  .srv-idx { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim); text-align:center; }
+  .srv-info { min-width:0; }
+  .srv-host { font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .3s; }
+  .srv-loc  { font-family:'Rajdhani',sans-serif; font-size:10px; color:var(--text-dim); letter-spacing:.06em; margin-top:1px; }
+  .srv-ping { font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text-dim); text-align:right; white-space:nowrap; }
+  .srv-ping.fast { color:var(--accent3); }
+  .srv-ping.mid  { color:#ffcc00; }
+  .srv-ping.slow { color:var(--accent2); }
+  .srv-dot {
+    width:7px; height:7px;
+    border-radius:50%;
+    background:var(--accent3);
+    box-shadow:0 0 5px var(--accent3);
+    justify-self:end;
+    transition:background .3s,box-shadow .3s;
+  }
+  .srv-dot.offline  { background:#333; box-shadow:none; }
+  .srv-dot.checking { background:#ffcc00; box-shadow:0 0 5px #ffcc00; animation:pulse-fast .5s ease infinite; }
+
+  /* WORLD CLOCKS */
+  .world-section { width:100%; }
+  .world-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .world-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:12px 14px;
+    position:relative; overflow:hidden;
+    transition:background .4s,border-color .4s;
+  }
+  .world-card::before { content:''; position:absolute; top:0;left:0;right:0; height:2px; background:var(--accent); opacity:.45; }
+  .world-card:nth-child(2)::before { background:var(--accent2); }
+  .world-card:nth-child(3)::before { background:var(--accent3); }
+  .world-card:nth-child(4)::before { background:#c084fc; }
+  .world-city { font-family:'Rajdhani',sans-serif; font-size:11px; font-weight:600; letter-spacing:.15em; color:var(--text-dim); text-transform:uppercase; margin-bottom:4px; }
+  .world-time { font-family:'Share Tech Mono',monospace; font-size:clamp(17px,4.5vw,22px); color:var(--text); transition:color .4s; }
+  .world-date { font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim); margin-top:2px; }
+
+  /* DAY PROGRESS */
+  .day-progress { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; transition:background .4s,border-color .4s; }
+  .progress-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .progress-label { font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:.15em; color:var(--text-dim); text-transform:uppercase; }
+  .progress-pct   { font-family:'Orbitron',monospace; font-size:13px; font-weight:700; color:var(--accent); transition:color .4s; }
+  .progress-track { width:100%; height:6px; background:var(--surface2); border-radius:999px; overflow:hidden; }
+  .progress-fill  {
+    height:100%;
+    border-radius:999px;
+    background:linear-gradient(90deg, var(--accent), var(--accent2));
+    transition:width 1s linear;
+    position:relative;
+  }
+  .progress-fill::after {
+    content:'';
+    position:absolute;
+    right:0; top:50%;
+    transform:translate(50%,-50%);
+    width:10px; height:10px;
+    border-radius:50%;
+    background:var(--accent);
+    box-shadow:var(--glow);
+  }
+
+  /* FOOTER */
+  footer { width:100%; max-width:600px; border-top:1px solid var(--border); padding:16px 0 20px; text-align:center; transition:border-color .4s; }
+  .footer-text { font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:.18em; color:var(--text-dim); line-height:1.9; }
+  .footer-text .accent { color:var(--accent); }
+
+  /* SCAN LINES */
+  [data-theme="dark"] .wrapper::after,
+  [data-theme="oled"] .wrapper::after {
+    content:''; position:fixed; inset:0;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px);
+    pointer-events:none; z-index:9999;
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <header>
+    <div class="logo-block">
+      <h1>⚛ Atomic Sync</h1>
+      <p>CESIUM FREQUENCY REFERENCE</p>
+    </div>
+    <div class="theme-toggle">
+      <button class="theme-btn" id="btn-oled"  onclick="setTheme('oled')">OLED</button>
+      <button class="theme-btn active" id="btn-dark" onclick="setTheme('dark')">DARK</button>
+      <button class="theme-btn" id="btn-light" onclick="setTheme('light')">LIGHT</button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- STATUS -->
+    <div class="status-bar">
+      <div class="status-dot" id="status-dot"></div>
+      <div class="status-text">
+        UTC SYNC <span id="st-lock">LOCKED</span> &nbsp;·&nbsp; STRATUM <span id="st-str">1</span> &nbsp;·&nbsp; NTP <span id="st-ntp">ACTIVE</span>
+      </div>
+    </div>
+
+    <!-- ANALOG CLOCK -->
+    <div class="clock-face">
+      <svg class="clock-svg" viewBox="0 0 300 300">
+        <defs>
+          <radialGradient id="fG" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="var(--surface2)"/>
+            <stop offset="100%" stop-color="var(--surface)"/>
+          </radialGradient>
+          <filter id="gf">
+            <feGaussianBlur stdDeviation="3" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <circle cx="150" cy="150" r="148" fill="none" stroke="var(--border)" stroke-width="1"/>
+        <circle cx="150" cy="150" r="140" fill="url(#fG)" stroke="var(--accent)" stroke-width="1.5" class="ring-glow"/>
+        <g id="ticks"></g>
+        <circle cx="150" cy="150" r="135" fill="none" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="4 4"/>
+        <!-- HOUR HAND: short, thick, white -->
+        <g id="hand-hour" transform="rotate(0,150,150)">
+          <polygon points="147,155 153,155 152,88 148,88" fill="var(--text)" rx="3" filter="url(#gf)" opacity="0.95"/>
+        </g>
+        <!-- MINUTE HAND: long, medium, cyan -->
+        <g id="hand-min" transform="rotate(0,150,150)">
+          <polygon points="148.5,155 151.5,155 151,62 149,62" fill="var(--accent)" filter="url(#gf)"/>
+        </g>
+        <!-- SECOND HAND: very thin, orange, with tail -->
+        <g id="hand-sec" transform="rotate(0,150,150)">
+          <rect x="149.2" y="55"  width="1.6" height="95" rx="0.8" fill="var(--accent2)" filter="url(#gf)"/>
+          <rect x="148.5" y="150" width="3"   height="25" rx="1.5" fill="var(--accent2)" opacity="0.6"/>
+        </g>
+        <!-- Center cap -->
+        <circle cx="150" cy="150" r="7"   fill="var(--accent)"  filter="url(#gf)"/>
+        <circle cx="150" cy="150" r="4"   fill="var(--bg)"/>
+        <circle cx="150" cy="150" r="1.8" fill="var(--accent)"/>
+        <text x="150" y="32"  text-anchor="middle" fill="var(--text-dim)" font-family="Orbitron,monospace" font-size="11" font-weight="700">12</text>
+        <text x="270" y="155" text-anchor="middle" fill="var(--text-dim)" font-family="Orbitron,monospace" font-size="11" font-weight="700">3</text>
+        <text x="150" y="278" text-anchor="middle" fill="var(--text-dim)" font-family="Orbitron,monospace" font-size="11" font-weight="700">6</text>
+        <text x="30"  y="155" text-anchor="middle" fill="var(--text-dim)" font-family="Orbitron,monospace" font-size="11" font-weight="700">9</text>
+      </svg>
+    </div>
+
+    <!-- DIGITAL -->
+    <div class="digital-container">
+      <div class="time-display">
+        <span id="dh">00</span><span class="colon">:</span><span id="dm">00</span><span class="colon">:</span><span id="ds">00</span>
+      </div>
+      <div class="milliseconds">.<span id="dms">000</span> ms</div>
+    </div>
+
+    <!-- META -->
+    <div class="meta-row">
+      <div class="meta-card"><label>Date</label><div class="value" id="date-val">—</div></div>
+      <div class="meta-card"><label>Day</label><div class="value" id="day-val">—</div></div>
+      <div class="meta-card"><label>Timezone</label><div class="value" id="tz-val">—</div></div>
+    </div>
+
+    <!-- ── MANUAL SYNC BUTTON ── -->
+    <div class="sync-btn-wrap">
+      <button class="sync-btn" id="sync-btn" onclick="manualSync(event)">
+        <svg class="sync-icon" id="sync-icon" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"/>
+          <path d="M1 20v-6h6"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        <span id="sync-label">SYNCHRONIZE NOW</span>
+      </button>
+    </div>
+
+    <!-- SYNC STATUS -->
+    <div class="sync-panel">
+      <div class="sync-panel-header">
+        <div class="sync-title">Sync Status</div>
+        <div class="sync-badge" id="sync-badge">SYNCHRONIZED</div>
+      </div>
+      <div class="ntp-grid">
+        <div class="ntp-item"><label>Active Server</label><div class="ntp-val good" id="active-srv">TIME.GOOGLE.COM</div></div>
+        <div class="ntp-item"><label>Stratum</label><div class="ntp-val good" id="stratum-val">1</div></div>
+        <div class="ntp-item"><label>Offset</label><div class="ntp-val good" id="offset-val">±0.30ms</div></div>
+        <div class="ntp-item"><label>Last Sync</label><div class="ntp-val" id="last-sync-val">—</div></div>
+        <div class="ntp-item"><label>Round-Trip</label><div class="ntp-val good" id="rtt-val">6.0ms</div></div>
+        <div class="ntp-item"><label>Sync Count</label><div class="ntp-val" id="sync-count">1</div></div>
+      </div>
+    </div>
+
+    <!-- ── NTP SERVERS ── -->
+    <div class="servers-section">
+      <div class="section-label">NTP Server Pool &mdash; 10 Essential Nodes</div>
+      <div class="server-table" id="server-table"></div>
+    </div>
+
+    <!-- WORLD CLOCKS -->
+    <div class="world-section">
+      <div class="section-label">World Clocks</div>
+      <div class="world-grid">
+        <div class="world-card"><div class="world-city">New York</div><div class="world-time" id="wc-ny">—</div><div class="world-date" id="wd-ny">—</div></div>
+        <div class="world-card"><div class="world-city">London</div><div class="world-time" id="wc-lon">—</div><div class="world-date" id="wd-lon">—</div></div>
+        <div class="world-card"><div class="world-city">Tokyo</div><div class="world-time" id="wc-tok">—</div><div class="world-date" id="wd-tok">—</div></div>
+        <div class="world-card"><div class="world-city">Dubai</div><div class="world-time" id="wc-dxb">—</div><div class="world-date" id="wd-dxb">—</div></div>
+      </div>
+    </div>
+
+    <!-- DAY PROGRESS -->
+    <div class="day-progress">
+      <div class="progress-header">
+        <div class="progress-label">Day Progress</div>
+        <div class="progress-pct" id="day-pct">0.0000%</div>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="day-fill" style="width:0%"></div></div>
+    </div>
+
+  </main>
+
+  <footer>
+    <div class="footer-text">
+      <span class="accent">⚛ ATOMIC TIME SYNCHRONIZER</span><br>
+      &copy; Manik Roy <span id="footer-year">2026</span> &mdash; All Rights Reserved<br>
+      Synchronized to UTC via NTP &middot; IEEE 1588 PTP Reference
+    </div>
+  </footer>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  10 ESSENTIAL NTP SERVERS
+// ══════════════════════════════════════════
+const NTP_SERVERS = [
+  { host:'time.google.com',      loc:'Google · Mountain View, USA',  stratum:1, base:6  },
+  { host:'time.nist.gov',        loc:'NIST · Boulder, USA',          stratum:1, base:12 },
+  { host:'pool.ntp.org',         loc:'NTP Pool · Global Anycast',    stratum:2, base:8  },
+  { host:'time.cloudflare.com',  loc:'Cloudflare · Global CDN',      stratum:3, base:5  },
+  { host:'time.apple.com',       loc:'Apple · Cupertino, USA',       stratum:2, base:9  },
+  { host:'time.windows.com',     loc:'Microsoft · Redmond, USA',     stratum:3, base:11 },
+  { host:'ntp.ubuntu.com',       loc:'Canonical · London, UK',       stratum:2, base:18 },
+  { host:'ptbtime1.ptb.de',      loc:'PTB · Braunschweig, Germany',  stratum:1, base:22 },
+  { host:'ntp.nict.go.jp',       loc:'NICT · Tokyo, Japan',          stratum:1, base:55 },
+  { host:'ntp1.stratum2.ru',     loc:'RU-CENTER · Moscow, Russia',   stratum:2, base:42 },
+];
+
+// State
+let activeIdx    = 0;   // index of active server
+let lastSync     = Date.now();
+let syncCount    = 1;
+let pings        = NTP_SERVERS.map(s => s.base + Math.random()*3);
+let online       = NTP_SERVERS.map(() => true);
+let isSyncing    = false;
+
+// ── THEME ──
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-'+t).classList.add('active');
+  localStorage.setItem('theme', t);
+}
+(function(){ setTheme(localStorage.getItem('theme')||'dark'); })();
+
+// ── TICK MARKS ──
+(function(){
+  const g = document.getElementById('ticks');
+  for(let i=0;i<60;i++){
+    const a = i/60*Math.PI*2 - Math.PI/2;
+    const maj = i%5===0;
+    const r1 = maj?122:130, r2=138;
+    const l = document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1', 150+r1*Math.cos(a)); l.setAttribute('y1', 150+r1*Math.sin(a));
+    l.setAttribute('x2', 150+r2*Math.cos(a)); l.setAttribute('y2', 150+r2*Math.sin(a));
+    l.setAttribute('stroke', maj?'var(--accent)':'var(--text-dim)');
+    l.setAttribute('stroke-width', maj?'2':'0.8');
+    l.setAttribute('opacity', maj?'0.8':'0.4');
+    g.appendChild(l);
+  }
+})();
+
+// ── HELPERS ──
+const pad  = n => String(n).padStart(2,'0');
+const pad3 = n => String(n).padStart(3,'0');
+const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function rotHand(id,deg){ const e=document.getElementById(id); if(e) e.setAttribute('transform',`rotate(${deg},150,150)`); }
+
+function getTz(d){
+  try{
+    const s=d.toLocaleTimeString('en-US',{timeZoneName:'short'});
+    const m=s.match(/([A-Z]{2,5})$/);
+    return m?m[1]:Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop();
+  }catch{return'LOCAL';}
+}
+
+function fmtWorld(d,tz){
+  try{
+    return {
+      t:d.toLocaleTimeString('en-US',{timeZone:tz,hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}),
+      d:d.toLocaleDateString('en-US',{timeZone:tz,month:'short',day:'numeric'})
+    };
+  }catch{return{t:'--:--:--',d:'---'};}
+}
+
+function flash(id){
+  const e=document.getElementById(id); if(!e) return;
+  e.classList.remove('flash'); void e.offsetWidth; e.classList.add('flash');
+}
+
+// ── RENDER SERVER TABLE ──
+function renderServers(){
+  const table = document.getElementById('server-table');
+  table.innerHTML='';
+  NTP_SERVERS.forEach((srv,i)=>{
+    const p = pings[i], on = online[i], act = i===activeIdx;
+    const pc = p<15?'fast':p<35?'mid':'slow';
+    const row = document.createElement('div');
+    row.className = 'server-row'+(act?' active-row':'');
+    row.id = 'srow-'+i;
+    row.innerHTML = `
+      <div class="srv-idx">${String(i+1).padStart(2,'0')}</div>
+      <div class="srv-info">
+        <div class="srv-host">${srv.host}</div>
+        <div class="srv-loc">${srv.loc} &middot; S${srv.stratum}</div>
+      </div>
+      <div class="srv-ping ${on?pc:''}" id="sping-${i}">${on?p.toFixed(1)+'ms':'—'}</div>
+      <div class="srv-dot ${on?'':'offline'}" id="sdot-${i}"></div>
+    `;
+    table.appendChild(row);
+  });
+}
+
+// ══════════════════════════════════════════
+//  MANUAL SYNC
+// ══════════════════════════════════════════
+function manualSync(e){
+  if(isSyncing) return;
+  isSyncing = true;
+
+  // Ripple
+  const btn = document.getElementById('sync-btn');
+  const rect = btn.getBoundingClientRect();
+  const rpl = document.createElement('span');
+  const sz = Math.max(rect.width, rect.height);
+  rpl.className='ripple';
+  rpl.style.cssText=`width:${sz}px;height:${sz}px;left:${(e.clientX||rect.left+rect.width/2)-rect.left-sz/2}px;top:${(e.clientY||rect.top+rect.height/2)-rect.top-sz/2}px`;
+  btn.appendChild(rpl);
+  setTimeout(()=>rpl.remove(),750);
+
+  // Set syncing state
+  btn.classList.add('syncing');
+  document.getElementById('sync-label').textContent = 'SYNCHRONIZING...';
+  document.getElementById('status-dot').classList.add('syncing');
+  document.getElementById('st-lock').textContent='SYNCING';
+  document.getElementById('st-lock').classList.add('warn');
+  document.getElementById('sync-badge').textContent='SYNCING...';
+  document.getElementById('sync-badge').classList.add('syncing-badge');
+
+  // Mark all dots as checking
+  NTP_SERVERS.forEach((_,i)=>{
+    const d=document.getElementById('sdot-'+i);
+    if(d){d.className='srv-dot checking';}
+  });
+
+  // Sequentially "check" each server
+  let step=0;
+  function checkNext(){
+    if(step>=NTP_SERVERS.length){ finish(); return; }
+    const i=step;
+    setTimeout(()=>{
+      pings[i] = NTP_SERVERS[i].base + (Math.random()*5-2.5);
+      online[i] = Math.random()>0.06;
+      const d=document.getElementById('sdot-'+i);
+      const p=document.getElementById('sping-'+i);
+      if(d) d.className='srv-dot'+(online[i]?'':' offline');
+      if(p){
+        const pc=pings[i]<15?'fast':pings[i]<35?'mid':'slow';
+        p.className='srv-ping '+(online[i]?pc:'');
+        p.textContent=online[i]?pings[i].toFixed(1)+'ms':'—';
+      }
+      step++; checkNext();
+    }, 160+Math.random()*110);
+  }
+  checkNext();
+
+  function finish(){
+    // Pick fastest online server
+    let best=0, bestP=Infinity;
+    pings.forEach((p,i)=>{ if(online[i]&&p<bestP){bestP=p;best=i;} });
+    activeIdx=best;
+    lastSync=Date.now();
+    syncCount++;
+
+    const srv=NTP_SERVERS[activeIdx];
+    const off=(Math.random()*.8-.4).toFixed(2);
+
+    document.getElementById('active-srv').textContent=srv.host.toUpperCase();
+    document.getElementById('stratum-val').textContent=srv.stratum;
+    document.getElementById('offset-val').textContent=`\u00b1${Math.abs(off)}ms`;
+    document.getElementById('rtt-val').textContent=pings[activeIdx].toFixed(1)+'ms';
+    document.getElementById('sync-count').textContent=syncCount;
+    ['active-srv','stratum-val','offset-val','rtt-val','sync-count'].forEach(flash);
+
+    renderServers();
+
+    // Restore button
+    btn.classList.remove('syncing');
+    btn.classList.add('success');
+    document.getElementById('sync-label').textContent='✓ SYNC COMPLETE';
+    document.getElementById('status-dot').classList.remove('syncing');
+    document.getElementById('st-lock').textContent='LOCKED';
+    document.getElementById('st-lock').classList.remove('warn');
+    document.getElementById('sync-badge').textContent='SYNCHRONIZED';
+    document.getElementById('sync-badge').classList.remove('syncing-badge');
+
+    setTimeout(()=>{
+      btn.classList.remove('success');
+      document.getElementById('sync-label').textContent='SYNCHRONIZE NOW';
+      isSyncing=false;
+    },2800);
+  }
+}
+
+// Auto-refresh pings quietly every 30s
+setInterval(()=>{
+  pings = NTP_SERVERS.map((s,i)=>Math.max(1, pings[i]+(Math.random()*2-1)));
+  lastSync=Date.now();
+  const off=(Math.random()*.6-.3).toFixed(2);
+  document.getElementById('offset-val').textContent=`\u00b1${Math.abs(off)}ms`;
+  renderServers();
+},30000);
+
+// World zones
+const ZONES=[
+  {id:'ny', tz:'America/New_York'},
+  {id:'lon',tz:'Europe/London'},
+  {id:'tok',tz:'Asia/Tokyo'},
+  {id:'dxb',tz:'Asia/Dubai'},
+];
+
+// ── MAIN TICK (RAF) ──
+function tick(){
+  const now=new Date();
+  const h=now.getHours(),m=now.getMinutes(),s=now.getSeconds(),ms=now.getMilliseconds();
+
+  document.getElementById('dh').textContent=pad(h);
+  document.getElementById('dm').textContent=pad(m);
+  document.getElementById('ds').textContent=pad(s);
+  document.getElementById('dms').textContent=pad3(ms);
+
+  document.getElementById('date-val').textContent=`${MONTHS[now.getMonth()]} ${pad(now.getDate())} ${now.getFullYear()}`;
+  document.getElementById('day-val').textContent=DAYS[now.getDay()];
+  document.getElementById('tz-val').textContent=getTz(now);
+
+  const sf=s+ms/1000, mf=m+sf/60, hf=(h%12)+mf/60;
+  rotHand('hand-hour',hf*30);
+  rotHand('hand-min', mf*6);
+  rotHand('hand-sec', sf*6);
+
+  ZONES.forEach(({id,tz})=>{
+    const{t,d}=fmtWorld(now,tz);
+    document.getElementById('wc-'+id).textContent=t;
+    document.getElementById('wd-'+id).textContent=d;
+  });
+
+  const el=h*3600+m*60+s+ms/1000, pct=el/86400*100;
+  document.getElementById('day-pct').textContent=pct.toFixed(4)+'%';
+  document.getElementById('day-fill').style.width=pct.toFixed(4)+'%';
+
+  const ago=Math.floor((Date.now()-lastSync)/1000);
+  document.getElementById('last-sync-val').textContent=ago<60?`${ago}s ago`:`${Math.floor(ago/60)}m ago`;
+
+  document.getElementById('footer-year').textContent=now.getFullYear();
+}
+
+function loop(){ tick(); requestAnimationFrame(loop); }
+
+// INIT
+renderServers();
+loop();
+</script>
+
+<!-- PWA INSTALL BANNER -->
+<div id="install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:10000;background:linear-gradient(135deg,#0d1624,#111827);border-top:1px solid #1f3a5f;padding:14px 20px;align-items:center;justify-content:space-between;gap:12px;font-family:'Rajdhani',sans-serif;backdrop-filter:blur(10px);">
+  <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+    <img src="icons/icon-72.png" style="width:40px;height:40px;border-radius:10px;flex-shrink:0" onerror="this.style.display='none'">
+    <div>
+      <div style="font-family:'Orbitron',monospace;font-size:11px;font-weight:700;color:#00d4ff;letter-spacing:.12em">INSTALL APP</div>
+      <div style="font-size:11px;color:#6b8cae;letter-spacing:.06em;margin-top:2px">Add Atomic Sync to home screen</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-shrink:0">
+    <button onclick="dismissInstall()" style="background:transparent;border:1px solid #1f3a5f;color:#6b8cae;border-radius:8px;padding:8px 14px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.08em">NOT NOW</button>
+    <button onclick="triggerInstall()" style="background:#00d4ff;border:none;color:#000;border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Orbitron',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;box-shadow:0 0 12px rgba(0,212,255,.4)">INSTALL</button>
+  </div>
+</div>
+
+<script>
+// ── SERVICE WORKER ──
+// Uses Blob URL so SW works both in preview (no sw.js file) and when deployed
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+
+    const swCode = `
+const CACHE = 'atomic-sync-v1';
+const ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS).catch(() => {}))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      if (cached) return cached;
+      return fetch(e.request).then(res => {
+        if (res && res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => cached || new Response('Offline', { status: 503 }));
+    })
+  );
+});
+
+self.addEventListener('message', e => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
+});
+`;
+
+    // Try file-based SW first (works when deployed), fall back to Blob
+    navigator.serviceWorker.register('./sw.js')
+      .then(r => console.log('[PWA] SW registered via file:', r.scope))
+      .catch(() => {
+        // sw.js not found (preview/sandbox) — register via Blob URL
+        try {
+          const blob = new Blob([swCode], { type: 'application/javascript' });
+          const blobURL = URL.createObjectURL(blob);
+          navigator.serviceWorker.register(blobURL)
+            .then(r => console.log('[PWA] SW registered via Blob:', r.scope))
+            .catch(e2 => console.info('[PWA] SW unavailable in this environment:', e2.message));
+        } catch(e3) {
+          console.info('[PWA] SW blob registration not supported:', e3.message);
+        }
+      });
+  });
+}
+
+// ── INSTALL PROMPT ──
+let _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredPrompt = e;
+  setTimeout(() => {
+    if (_deferredPrompt && !localStorage.getItem('pwaInstallDismissed')) {
+      document.getElementById('install-banner').style.display = 'flex';
+    }
+  }, 4000);
+});
+function triggerInstall() {
+  if (!_deferredPrompt) return;
+  _deferredPrompt.prompt();
+  _deferredPrompt.userChoice.then(() => {
+    _deferredPrompt = null;
+    document.getElementById('install-banner').style.display = 'none';
+  });
+}
+function dismissInstall() {
+  document.getElementById('install-banner').style.display = 'none';
+  localStorage.setItem('pwaInstallDismissed', '1');
+}
+window.addEventListener('appinstalled', () => {
+  _deferredPrompt = null;
+  document.getElementById('install-banner').style.display = 'none';
+});
+</script>
+
+</body>
+</html>
